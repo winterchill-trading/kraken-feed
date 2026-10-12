@@ -30,4 +30,5 @@
   exchange-core
   ppx_jane
   yojson
-  uri))
+  uri
+  (core_bench :with-test)))

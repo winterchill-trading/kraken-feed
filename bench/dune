@@ -1,0 +1,31 @@
+(executable
+ (name main)
+ (libraries core core_unix.command_unix core_bench kraken-feed)
+ (preprocess
+  (pps ppx_jane)))
+
+; The recorded minute from test/fixtures, embedded as strings.
+
+(rule
+ (target frames.ml)
+ (deps
+  (glob_files_rec ../test/fixtures/raw/**.ndjson))
+ (action
+  (with-stdout-to
+   frames.ml
+   (progn
+    (echo "let trades = {json|")
+    (cat ../test/fixtures/raw/kraken/trades/BTC_USD/2026/10/12/13-34.ndjson)
+    (cat ../test/fixtures/raw/kraken/trades/BTC_USD/2026/10/12/13-35.ndjson)
+    (echo "|json}\nlet bbo = {json|")
+    (cat ../test/fixtures/raw/kraken/bbo/BTC_USD/2026/10/12/13-34.ndjson)
+    (cat ../test/fixtures/raw/kraken/bbo/BTC_USD/2026/10/12/13-35.ndjson)
+    (echo "|json}\nlet l2 = {json|")
+    (cat ../test/fixtures/raw/kraken/l2/BTC_USD/2026/10/12/13-34.ndjson)
+    (cat ../test/fixtures/raw/kraken/l2/BTC_USD/2026/10/12/13-35.ndjson)
+    (echo "|json}\nlet funding = {json|")
+    (cat
+     ../test/fixtures/raw/kraken/funding/PF_XBTUSD/2026/10/12/13-34.ndjson)
+    (cat
+     ../test/fixtures/raw/kraken/funding/PF_XBTUSD/2026/10/12/13-35.ndjson)
+    (echo "|json}\n")))))
