@@ -20,7 +20,9 @@ let spot symbol =
   match String.chop_prefix symbol ~prefix:"PF_" with
   | None when not (is_futures symbol) -> symbol
   | Some pair when String.length pair > 3 ->
-    let base, quote = String.split_n pair (String.length pair - 3) in
+    let n = String.length pair - 3 in
+    let base = String.prefix pair n
+    and quote = String.drop_prefix pair n in
     let base = if String.equal base "XBT" then "BTC" else base in
     base ^ "/" ^ quote
   | None | Some _ ->
