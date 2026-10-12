@@ -14,9 +14,11 @@
     [symbols] may be spot ([BTC/USD]) or futures ([PF_XBTUSD]) names; each stream maps
     them with {!Symbols} to the API it uses. See {!Normalizer} for the event fields.
 
-    [recv_ts] is [Time_ns.now ()] when the frame is received. [on_raw] gets that frame
-    unparsed, first, including acks and heartbeats. Undecodable frames are logged, counted
-    in {!stats} and skipped.
+    [recv_ts] is the time when the frame is received, read from [time_source] (default the
+    wall clock), which also drives the keepalive, the silence watchdog and the
+    reconnection delays, so tests can step them with a synthetic clock. [on_raw] gets that
+    frame unparsed, first, including acks and heartbeats. Undecodable frames are logged,
+    counted in {!stats} and skipped.
 
     Disconnects are handled by {!Venue_net.Ws_client}: it reconnects with exponential
     backoff, and the feed then resubscribes; books are cleared so the snapshot that
@@ -33,6 +35,7 @@ open Async
 val create
   :  ?on_raw:(stream:Market_data.Stream.t -> recv_ts:Time_ns.t -> string -> unit)
   -> ?l2_depth:int
+  -> ?time_source:Time_source.t
   -> Config.t
   -> symbols:string list
   -> streams:Market_data.Stream.t list
@@ -44,6 +47,7 @@ type t
 val start
   :  ?on_raw:(stream:Market_data.Stream.t -> recv_ts:Time_ns.t -> string -> unit)
   -> ?l2_depth:int
+  -> ?time_source:Time_source.t
   -> Config.t
   -> symbols:string list
   -> streams:Market_data.Stream.t list

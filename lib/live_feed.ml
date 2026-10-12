@@ -49,7 +49,14 @@ let stats t : Stats.t =
   }
 ;;
 
-let start ?on_raw ?(l2_depth = 10) (config : Config.t) ~symbols ~streams =
+let start
+  ?on_raw
+  ?(l2_depth = 10)
+  ?(time_source = Time_source.wall_clock ())
+  (config : Config.t)
+  ~symbols
+  ~streams
+  =
   let streams = List.dedup_and_sort streams ~compare:Md.Stream.compare in
   if List.mem streams Private ~equal:Md.Stream.equal
   then raise_s [%message "Live_feed.create: the private stream is not a market feed"];
@@ -87,7 +94,13 @@ let start ?on_raw ?(l2_depth = 10) (config : Config.t) ~symbols ~streams =
       Ws_client.send ws (subscribe_request ~l2_depth stream symbols)
     in
     let%map ws =
-      Ws_client.connect ~ping ~on_connect ~log_name:("kraken " ^ stream_name) ~url ()
+      Ws_client.connect
+        ~time_source
+        ~ping
+        ~on_connect
+        ~log_name:("kraken " ^ stream_name)
+        ~url
+        ()
       >>| Or_error.ok_exn
     in
     let resubscribe symbol =
@@ -100,7 +113,7 @@ let start ?on_raw ?(l2_depth = 10) (config : Config.t) ~symbols ~streams =
     in
     don't_wait_for
       (Pipe.iter_without_pushback (Ws_client.messages ws) ~f:(fun frame ->
-         let recv_ts = Time_ns.now () in
+         let recv_ts = Time_source.now time_source in
          counters.frames <- counters.frames + 1;
          Option.iter on_raw ~f:(fun on_raw -> on_raw ~stream ~recv_ts frame);
          match Normalizer.frame normalizer ~recv_ts frame with
@@ -151,7 +164,7 @@ let start ?on_raw ?(l2_depth = 10) (config : Config.t) ~symbols ~streams =
   return { feed; counters; sockets = !opened }
 ;;
 
-let create ?on_raw ?l2_depth config ~symbols ~streams =
-  let%map t = start ?on_raw ?l2_depth config ~symbols ~streams in
+let create ?on_raw ?l2_depth ?time_source config ~symbols ~streams =
+  let%map t = start ?on_raw ?l2_depth ?time_source config ~symbols ~streams in
   t.feed
 ;;
