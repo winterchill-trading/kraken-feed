@@ -61,3 +61,9 @@ let print_output (output : Kraken_feed.Normalizer.Output.t Or_error.t) =
     if not (List.is_empty resubscribe)
     then print_s [%sexp Resubscribe (resubscribe : string list)]
 ;;
+
+let approx ~expected ~tolerance actual =
+  if abs (actual - expected) <= tolerance
+  then Sexp.Atom (sprintf "%d+-%d" expected tolerance)
+  else [%sexp (actual : int)]
+;;
