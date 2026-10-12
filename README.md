@@ -101,3 +101,54 @@ $ kraken-feed feed -symbol BTC/USD -streams funding -count 2
   (mark_price 82837.23537313) (index_price 82833.66)))
 ```
 
+## Coverage
+
+| Stream | Venue channel | Endpoint | Verified live |
+| --- | --- | --- | --- |
+| `trades` | spot v2 `trade` (`snapshot: false`) | `wss://ws.kraken.com/v2` | yes |
+| `bbo` | spot v2 `ticker` with `event_trigger: "bbo"` | `wss://ws.kraken.com/v2` | yes |
+| `l2` | spot v2 `book`, depth 10 (or 25/100/500/1000), CRC32 checked on every message | `wss://ws.kraken.com/v2` | yes (depth 10 and 100, two symbols, 30s, no checksum mismatch) |
+| `funding` | futures v1 `ticker` | `wss://futures.kraken.com/ws/v1` | yes |
+| `private` | not supported (public feed only) | | n/a |
+
+## Symbols
+
+- Spot uses `BASE/QUOTE` with ISO codes: `BTC/USD`, `ETH/USD`. The v2 API rejects the
+  legacy `XBT/USD`.
+- Futures uses `PF_XBTUSD` for the linear perpetual (`PI_` inverse, `FI_` fixed
+  maturity).
+- `-symbol` takes either form. Spot streams map `PF_XBTUSD` to `BTC/USD`, the funding
+  stream maps `BTC/USD` to `PF_XBTUSD` (`Kraken_feed.Symbols`). Instruments carry the
+  name of the API that produced them: `kraken:BTC/USD` for trades/bbo/l2,
+  `kraken:PF_XBTUSD` for funding.
+
+## Behaviour
+
+- One websocket per stream. Spot connections send `{"method":"ping"}` every 30s; the
+  futures connection sends a websocket ping frame (it has no JSON ping and drops idle
+  connections after 60s). A connection silent for two ping intervals is replaced.
+- After a reconnect every stream resubscribes; books are cleared and the snapshot that
+  follows is emitted as a fresh `Snapshot`.
+- Book integrity: there are no sequence numbers on Kraken spot; every message carries a
+  CRC32 of the top 10 levels. Number literals are kept as sent (frames are parsed with
+  `Yojson.Raw`) so the checksum matches. A mismatch drops the book, unsubscribes and
+  subscribes the symbol again, and waits for the new snapshot.
+- Levels pushed beyond the subscribed depth are removed locally (Kraken does not send
+  removals for them) and reported in the `Delta` as zero-size levels, so a consumer's
+  book stays the same as the venue's.
+- `funding` is emitted when the rate, next funding time, mark or index changes; the
+  ticker arrives about once per second.
+
+## Limitations
+
+- Trades, BBO and L2 come from the spot market only. Kraken Futures has its own `trade`
+  and `book` feeds for `PF_XBTUSD` (with sequence numbers), which are not wired in.
+- `Funding.rate` is `relative_funding_rate`: the rate per funding period (hourly on
+  Kraken perpetuals) as a fraction of the spot price. The absolute `funding_rate` and
+  the predicted rates are not carried. `Funding.t` has no field for the period, so
+  consumers comparing venues must know it is hourly here.
+- Mark prices with more than 8 decimals are truncated to the fixed-point precision.
+- Exchange timestamps can be a few tens of milliseconds ahead of `recv_ts` when the
+  local clock lags.
+- Spot symbols contain `/`; any consumer that builds file paths from the symbol (for
+  example a raw frame recorder) needs to escape it.
