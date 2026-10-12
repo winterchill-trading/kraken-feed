@@ -20,7 +20,36 @@ let subscribe_request ?unsubscribe ?(l2_depth = 10) (stream : Md.Stream.t) symbo
 
 let ping_interval = Time_ns.Span.of_sec 30.
 
-let create ?on_raw ?(l2_depth = 10) (config : Config.t) ~symbols ~streams =
+module Stats = struct
+  type t =
+    { frames : int
+    ; parse_errors : int
+    ; reconnects : int
+    }
+  [@@deriving sexp_of]
+end
+
+type counters =
+  { mutable frames : int
+  ; mutable parse_errors : int
+  }
+
+type t =
+  { feed : Md.Feed.t
+  ; counters : counters
+  ; sockets : Ws_client.t list
+  }
+
+let feed t = t.feed
+
+let stats t : Stats.t =
+  { frames = t.counters.frames
+  ; parse_errors = t.counters.parse_errors
+  ; reconnects = List.sum (module Int) t.sockets ~f:Ws_client.reconnects
+  }
+;;
+
+let start ?on_raw ?(l2_depth = 10) (config : Config.t) ~symbols ~streams =
   let streams = List.dedup_and_sort streams ~compare:Md.Stream.compare in
   if List.mem streams Private ~equal:Md.Stream.equal
   then raise_s [%message "Live_feed.create: the private stream is not a market feed"];
@@ -30,6 +59,7 @@ let create ?on_raw ?(l2_depth = 10) (config : Config.t) ~symbols ~streams =
   let bbo_r, bbo_w = Pipe.create () in
   let l2_r, l2_w = Pipe.create () in
   let funding_r, funding_w = Pipe.create () in
+  let counters = { frames = 0; parse_errors = 0 } in
   let emit : Md.Event.t -> unit = function
     | Trade x -> Pipe.write_without_pushback_if_open trades_w x
     | Bbo x -> Pipe.write_without_pushback_if_open bbo_w x
@@ -71,9 +101,11 @@ let create ?on_raw ?(l2_depth = 10) (config : Config.t) ~symbols ~streams =
     don't_wait_for
       (Pipe.iter_without_pushback (Ws_client.messages ws) ~f:(fun frame ->
          let recv_ts = Time_ns.now () in
+         counters.frames <- counters.frames + 1;
          Option.iter on_raw ~f:(fun on_raw -> on_raw ~stream ~recv_ts frame);
          match Normalizer.frame normalizer ~recv_ts frame with
          | Error error ->
+           counters.parse_errors <- counters.parse_errors + 1;
            Log.Global.error_s
              [%message
                "kraken feed: cannot parse frame"
@@ -107,7 +139,7 @@ let create ?on_raw ?(l2_depth = 10) (config : Config.t) ~symbols ~streams =
       Pipe.close l2_w;
       Pipe.close funding_w)
   in
-  return
+  let feed =
     (module struct
       let trades = trades_r
       let bbo = bbo_r
@@ -115,4 +147,11 @@ let create ?on_raw ?(l2_depth = 10) (config : Config.t) ~symbols ~streams =
       let funding = funding_r
       let close () = Lazy_deferred.force_exn closed
     end : Md.Feed.S)
+  in
+  return { feed; counters; sockets = !opened }
+;;
+
+let create ?on_raw ?l2_depth config ~symbols ~streams =
+  let%map t = start ?on_raw ?l2_depth config ~symbols ~streams in
+  t.feed
 ;;

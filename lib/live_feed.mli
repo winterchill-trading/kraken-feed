@@ -15,8 +15,8 @@
     them with {!Symbols} to the API it uses. See {!Normalizer} for the event fields.
 
     [recv_ts] is [Time_ns.now ()] when the frame is received. [on_raw] gets that frame
-    unparsed, first, including acks and heartbeats. Undecodable frames are logged and
-    skipped.
+    unparsed, first, including acks and heartbeats. Undecodable frames are logged, counted
+    in {!stats} and skipped.
 
     Disconnects are handled by {!Venue_net.Ws_client}: it reconnects with exponential
     backoff, and the feed then resubscribes; books are cleared so the snapshot that
@@ -37,6 +37,30 @@ val create
   -> symbols:string list
   -> streams:Market_data.Stream.t list
   -> Market_data.Feed.t Deferred.t
+
+type t
+
+(** Like {!create}, keeping the handle for {!stats}. *)
+val start
+  :  ?on_raw:(stream:Market_data.Stream.t -> recv_ts:Time_ns.t -> string -> unit)
+  -> ?l2_depth:int
+  -> Config.t
+  -> symbols:string list
+  -> streams:Market_data.Stream.t list
+  -> t Deferred.t
+
+val feed : t -> Market_data.Feed.t
+
+module Stats : sig
+  type t =
+    { frames : int (** websocket text frames received, acks and heartbeats included *)
+    ; parse_errors : int (** frames that did not decode and were dropped *)
+    ; reconnects : int (** successful reconnections, summed over the connections *)
+    }
+  [@@deriving sexp_of]
+end
+
+val stats : t -> Stats.t
 
 (** The subscribe request for a stream, with symbols already mapped. *)
 val subscribe_request
