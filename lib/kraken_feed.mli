@@ -5,3 +5,4 @@ module Wire = Wire
 module Checksum = Checksum
 module Local_book = Local_book
 module Normalizer = Normalizer
+module Symbols = Symbols
