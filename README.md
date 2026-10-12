@@ -170,6 +170,34 @@ Words are pinned (within 10) in `test/test_allocation.ml`; times are from
 - `funding` is emitted when the rate, next funding time, mark or index changes; the
   ticker arrives about once per second.
 
+## Gaps: what a reconnect loses
+
+`Live_feed.feed_with_gaps` (`Live_feed.start`, then the accessor; `feed` is unchanged)
+adds a `gaps` pipe of `Market_data.Gap.t`, always `venue = Kraken`, `reason = Resync`
+and the stream set:
+
+- a reconnect of a stream's socket: `instrument = None`, written before any event of
+  the new connection (the books are cleared at the same moment);
+- a book checksum mismatch: `instrument` set to the symbol, written before the
+  resubscription's snapshot.
+
+Kraken's websockets have no resume or replay, so everything between the drop and the
+resubscription is gone:
+
+- trades printed while disconnected are not resent (the REST `Trades` endpoint with
+  `since` could backfill them; not done here);
+- the book restarts from a new snapshot; updates arriving before it are dropped;
+- BBO resumes on the next ticker update, funding on the next futures ticker (about 1s).
+
+Numbers from `test/test_gaps.ml` (synthetic clock, loopback sockets): the first
+reconnect waits the 0.5s initial backoff +/- 20% jitter, so 0.4s to 0.6s of silence
+plus the handshake; the test drops at t = 0.1s and sees the gap and the new snapshot
+both stamped t = 0.7s. A book update sent on the new connection before its snapshot is
+dropped (1 of 5 frames in the test produced no event). After a checksum mismatch the
+mismatching update itself is dropped and the next event is the new snapshot, one
+round trip (unsubscribe + subscribe) later. Backoff doubles per failed attempt up to
+30s.
+
 ## Limitations
 
 - Trades, BBO and L2 come from the spot market only. Kraken Futures has its own `trade`
