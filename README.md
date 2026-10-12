@@ -183,3 +183,9 @@ Words are pinned (within 10) in `test/test_allocation.ml`; times are from
   local clock lags.
 - Spot symbols contain `/`; any consumer that builds file paths from the symbol (for
   example a raw frame recorder) needs to escape it.
+
+## CI
+
+CI installs the pinned siblings and the opam dependencies through the shared
+[ox-setup](https://github.com/winterchill-trading/infra/blob/main/docs/ci.md) action, which
+caches the built opam switch between runs.
