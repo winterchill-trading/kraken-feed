@@ -19,6 +19,19 @@ Pipe.iter_without_pushback Feed.l2 ~f:(fun update -> ...)
 
 `Normalizer` is the pure part (frame to events, per-symbol checksummed books) and is
 what the tests drive; `Live_feed` adds one socket per stream, reconnects and resyncs.
+
+`Live_feed.start` returns a handle with the feed (`Live_feed.feed`) and counters
+(`Live_feed.stats`: frames received, frames that failed to parse, reconnects summed
+over the sockets). `?time_source` (default the wall clock) stamps `recv_ts` and drives
+pings, the silence watchdog and reconnect delays, so tests step them with a synthetic
+clock (`test/test_reconnect_fake_clock.ml`).
+
+`Raw_normalizer` is `Normalizer` as a `Market_data.Normalizer.S`, for rebuilding
+`norm/` from market-recorder raw files:
+
+```ocaml
+Market_data.Rebuild_norm.command [ (module Kraken_feed.Raw_normalizer) ]
+```
 The wire format is described in [docs/kraken-ws-spec.md](docs/kraken-ws-spec.md).
 
 ## Command line
@@ -26,6 +39,7 @@ The wire format is described in [docs/kraken-ws-spec.md](docs/kraken-ws-spec.md)
 ```
 kraken-feed feed -symbol <SYM> [-symbol <SYM> ...] -streams trades,bbo,l2,funding \
   [-count N] [-l2-depth 10|25|100|500|1000] [-raw]
+kraken-feed rebuild-norm -data-dir DIR -out NEW_DIR -date YYYY-MM-DD
 ```
 
 Live output against the real venue, 2026-10-12 (each stream also ran for 10+ seconds;
@@ -100,6 +114,23 @@ $ kraken-feed feed -symbol BTC/USD -streams funding -count 2
   (next_funding_time (2026-10-12 14:00:00.000000000+01:00))
   (mark_price 82837.23537313) (index_price 82833.66)))
 ```
+
+## Recorded fixtures and costs
+
+`test/fixtures/raw/kraken/` holds a mainnet recording from market-recorder
+(2026-10-12 13:34-13:35 UTC, BTC/USD and PF_XBTUSD, about 260 KB), trimmed and kept in
+the recorder's raw layout so `rebuild-norm` runs on it directly. Every frame decodes and
+normalizes; the book's 544 deltas pass their checksums:
+
+| Stream | Frames | Events | Minor words per frame | Time per frame |
+| --- | --- | --- | --- | --- |
+| `trades` | 155 | 212 trades | 964 | 3.8 us |
+| `bbo` | 158 | 148 BBOs | 789 | 3.9 us |
+| `l2` | 553 | 1 snapshot, 544 deltas | 1294 | 6.0 us |
+| `funding` | 64 | 19 funding | 868 | 6.3 us |
+
+Words are pinned (within 10) in `test/test_allocation.ml`; times are from
+`dune exec ./bench/main.exe -- -quota 3` on an M-series Mac, including JSON decoding.
 
 ## Coverage
 
