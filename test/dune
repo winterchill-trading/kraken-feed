@@ -1,0 +1,8 @@
+(library
+ (name kraken_feed_test)
+ (inline_tests
+  (flags
+   (:standard -source-tree-root .)))
+ (libraries core async kraken-feed market-data)
+ (preprocess
+  (pps ppx_jane)))
