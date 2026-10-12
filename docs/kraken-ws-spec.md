@@ -142,6 +142,15 @@ once per second:
 ### Keepalive
 
 The client must send something at least every 60 seconds or the server closes the
-connection. The feed sends a websocket ping frame every 30 seconds.
+connection. There is no JSON ping: `{"event":"ping"}` is answered with
+`{"event":"alert","message":"Bad websocket message"}`. The feed sends a websocket ping
+frame every 30 seconds instead.
 
-Errors come back as `{"event":"error","message":"..."}`.
+Errors come back as `{"event":"error","message":"..."}` or
+`{"event":"alert","message":"..."}`.
+
+## Resubscribing a book
+
+Subscribing to a book that is already subscribed is rejected, so a resync sends
+`unsubscribe` then `subscribe` on the same connection. Verified live: the venue acks
+both and sends a fresh `snapshot`.
