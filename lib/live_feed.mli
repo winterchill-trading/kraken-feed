@@ -24,8 +24,17 @@
     backoff, and the feed then resubscribes; books are cleared so the snapshot that
     follows a resubscription is emitted as a fresh [Snapshot]. Spot connections send an
     application ping every 30s, futures connections a websocket ping frame (the futures
-    API closes connections idle for 60s). Pipes of streams that were not requested stay
-    empty until [close]. Writes do not wait for readers, so consumers should keep up. *)
+    API closes connections idle for 60s).
+
+    Breaks are reported on {!feed_with_gaps}'s [gaps] pipe, always with reason [Resync],
+    [venue = Kraken] and the stream set:
+    - a reconnect of a stream's socket: [instrument = None] (every symbol of that
+      connection), written before any event of the new connection;
+    - a book checksum mismatch that resubscribes a symbol: [instrument] set, written
+      before the new snapshot.
+
+    Pipes of streams that were not requested stay empty until [close]. Writes do not wait
+    for readers, so consumers should keep up. *)
 
 open! Core
 open Async
@@ -54,6 +63,9 @@ val start
   -> t Deferred.t
 
 val feed : t -> Market_data.Feed.t
+
+(** The same feed with its [gaps] pipe (see above). *)
+val feed_with_gaps : t -> Market_data.Feed.With_gaps.t
 
 module Stats : sig
   type t =

@@ -35,12 +35,13 @@ type counters =
   }
 
 type t =
-  { feed : Md.Feed.t
+  { feed : Md.Feed.With_gaps.t
   ; counters : counters
   ; sockets : Ws_client.t list
   }
 
-let feed t = t.feed
+let feed t = Md.Feed.With_gaps.to_feed t.feed
+let feed_with_gaps t = t.feed
 
 let stats t : Stats.t =
   { frames = t.counters.frames
@@ -66,6 +67,17 @@ let start
   let bbo_r, bbo_w = Pipe.create () in
   let l2_r, l2_w = Pipe.create () in
   let funding_r, funding_w = Pipe.create () in
+  let gaps_r, gaps_w = Pipe.create () in
+  let gap ~recv_ts ~stream ?instrument () =
+    Pipe.write_without_pushback_if_open
+      gaps_w
+      { Md.Gap.recv_ts
+      ; venue = Kraken
+      ; instrument
+      ; stream = Some stream
+      ; reason = Resync
+      }
+  in
   let counters = { frames = 0; parse_errors = 0 } in
   let emit : Md.Event.t -> unit = function
     | Trade x -> Pipe.write_without_pushback_if_open trades_w x
@@ -86,11 +98,24 @@ let start
     in
     let symbols = List.dedup_and_sort symbols ~compare:String.compare in
     let normalizer = Normalizer.create ~l2_depth () in
+    (* Reconnects already reported. [on_connect] runs before the new connection's frames
+       are read, but frames travel through the client's pipe in a later job, so the frame
+       loop checks too: whichever runs first reports the gap and clears the books, so the
+       gap always precedes the new connection's events. *)
+    let reported = ref 0 in
+    let report_reconnect ws ~recv_ts =
+      let reconnects = Ws_client.reconnects ws in
+      if reconnects > !reported
+      then (
+        reported := reconnects;
+        Normalizer.reset normalizer;
+        gap ~recv_ts ~stream ())
+    in
     let on_connect ws =
       if Ws_client.reconnects ws > 0
       then (
         Log.Global.info "kraken feed: %s reconnected, resubscribing" stream_name;
-        Normalizer.reset normalizer);
+        report_reconnect ws ~recv_ts:(Time_source.now time_source));
       Ws_client.send ws (subscribe_request ~l2_depth stream symbols)
     in
     let%map ws =
@@ -115,6 +140,7 @@ let start
       (Pipe.iter_without_pushback (Ws_client.messages ws) ~f:(fun frame ->
          let recv_ts = Time_source.now time_source in
          counters.frames <- counters.frames + 1;
+         report_reconnect ws ~recv_ts;
          Option.iter on_raw ~f:(fun on_raw -> on_raw ~stream ~recv_ts frame);
          match Normalizer.frame normalizer ~recv_ts frame with
          | Error error ->
@@ -127,7 +153,9 @@ let start
                  (error : Error.t)]
          | Ok { events; resubscribe = symbols } ->
            List.iter events ~f:emit;
-           List.iter symbols ~f:(fun symbol -> don't_wait_for (resubscribe symbol))));
+           List.iter symbols ~f:(fun symbol ->
+             gap ~recv_ts ~stream ~instrument:(Normalizer.instrument symbol) ();
+             don't_wait_for (resubscribe symbol))));
     ws
   in
   let opened = ref [] in
@@ -150,7 +178,8 @@ let start
       Pipe.close trades_w;
       Pipe.close bbo_w;
       Pipe.close l2_w;
-      Pipe.close funding_w)
+      Pipe.close funding_w;
+      Pipe.close gaps_w)
   in
   let feed =
     (module struct
@@ -158,13 +187,14 @@ let start
       let bbo = bbo_r
       let l2 = l2_r
       let funding = funding_r
+      let gaps = gaps_r
       let close () = Lazy_deferred.force_exn closed
-    end : Md.Feed.S)
+    end : Md.Feed.With_gaps.S)
   in
   return { feed; counters; sockets = !opened }
 ;;
 
 let create ?on_raw ?l2_depth ?time_source config ~symbols ~streams =
   let%map t = start ?on_raw ?l2_depth ?time_source config ~symbols ~streams in
-  t.feed
+  feed t
 ;;
