@@ -14,7 +14,10 @@ let create ~depth =
 
 module Result = struct
   type t =
-    | Applied
+    | Applied of
+        { truncated_bids : Wire.Level.t list
+        ; truncated_asks : Wire.Level.t list
+        }
     | Waiting_for_snapshot
     | Checksum_mismatch of
         { expected : int
@@ -40,16 +43,17 @@ let set side (level : Wire.Level.t) =
   else Map.set side ~key:price ~data:level
 ;;
 
+(* Drops the levels beyond [depth], counted from the best price, and returns them. *)
 let truncate t =
-  let drop_beyond map ~keep =
-    if Map.length map <= t.depth
-    then map
-    else Map.filter_keys map ~f:(fun price -> Set.mem keep price)
+  let drop_bids = List.drop (bids t) t.depth
+  and drop_asks = List.drop (asks t) t.depth in
+  let remove map dropped =
+    List.fold dropped ~init:map ~f:(fun map (level : Wire.Level.t) ->
+      Map.remove map (Wire.Number.to_price level.price))
   in
-  let best_bids = List.take (Map.keys t.bids |> List.rev) t.depth |> Price.Set.of_list in
-  let best_asks = List.take (Map.keys t.asks) t.depth |> Price.Set.of_list in
-  t.bids <- drop_beyond t.bids ~keep:best_bids;
-  t.asks <- drop_beyond t.asks ~keep:best_asks
+  t.bids <- remove t.bids drop_bids;
+  t.asks <- remove t.asks drop_asks;
+  drop_bids, drop_asks
 ;;
 
 let checksum t = Checksum.of_levels ~bids:(bids t) ~asks:(asks t)
@@ -63,12 +67,12 @@ let apply t (kind : Wire.Kind.t) (book : Wire.Book.t) : Result.t =
      | Update -> ());
     t.bids <- List.fold book.bids ~init:t.bids ~f:set;
     t.asks <- List.fold book.asks ~init:t.asks ~f:set;
-    truncate t;
+    let truncated_bids, truncated_asks = truncate t in
     let computed = checksum t in
     if computed = book.checksum
     then (
       t.synced <- true;
-      Applied)
+      Applied { truncated_bids; truncated_asks })
     else (
       reset t;
       Checksum_mismatch { expected = book.checksum; computed })

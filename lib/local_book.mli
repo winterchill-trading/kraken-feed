@@ -13,7 +13,10 @@ val create : depth:int -> t
 
 module Result : sig
   type t =
-    | Applied
+    | Applied of
+        { truncated_bids : Wire.Level.t list
+        ; truncated_asks : Wire.Level.t list
+        } (** levels pushed beyond [depth] by this message, now dropped *)
     | Waiting_for_snapshot (** an update before the first snapshot; ignored *)
     | Checksum_mismatch of
         { expected : int
