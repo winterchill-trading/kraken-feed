@@ -1,0 +1,7 @@
+(executable
+ (name kraken_feed_cli)
+ (public_name kraken-feed)
+ (package kraken-feed)
+ (libraries core async core_unix.command_unix kraken-feed market-data uri)
+ (preprocess
+  (pps ppx_jane)))
