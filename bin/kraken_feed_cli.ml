@@ -72,5 +72,7 @@ let () =
   Command_unix.run
     (Command.group
        ~summary:"Read-only public Kraken market data"
-       [ "feed", feed_command ])
+       [ "feed", feed_command
+       ; "rebuild-norm", Md.Rebuild_norm.command [ (module Kraken_feed.Raw_normalizer) ]
+       ])
 ;;
