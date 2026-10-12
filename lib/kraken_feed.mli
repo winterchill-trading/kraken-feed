@@ -1,0 +1,3 @@
+(** Read-only public market data from Kraken as a {!Market_data.Feed.t}. *)
+
+module Config = Config

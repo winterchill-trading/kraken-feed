@@ -1,0 +1,6 @@
+(library
+ (name kraken_feed)
+ (public_name kraken-feed)
+ (libraries core async venue-net market-data yojson uri)
+ (preprocess
+  (pps ppx_jane)))
