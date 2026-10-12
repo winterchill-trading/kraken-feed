@@ -5,5 +5,6 @@ module Wire = Wire
 module Checksum = Checksum
 module Local_book = Local_book
 module Normalizer = Normalizer
+module Raw_normalizer = Raw_normalizer
 module Symbols = Symbols
 module Live_feed = Live_feed
