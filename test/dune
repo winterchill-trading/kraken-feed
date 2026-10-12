@@ -3,6 +3,6 @@
  (inline_tests
   (flags
    (:standard -source-tree-root .)))
- (libraries core async kraken-feed market-data)
+ (libraries core async uri kraken-feed market-data)
  (preprocess
   (pps ppx_jane)))
