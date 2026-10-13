@@ -124,13 +124,40 @@ normalizes; the book's 544 deltas pass their checksums:
 
 | Stream | Frames | Events | Minor words per frame | Time per frame |
 | --- | --- | --- | --- | --- |
-| `trades` | 155 | 212 trades | 964 | 3.8 us |
-| `bbo` | 158 | 148 BBOs | 789 | 3.9 us |
-| `l2` | 553 | 1 snapshot, 544 deltas | 1294 | 6.0 us |
-| `funding` | 64 | 19 funding | 868 | 6.3 us |
+| `trades` | 155 | 212 trades | 925 | 3.8 us |
+| `bbo` | 158 | 148 BBOs | 735 | 3.9 us |
+| `l2` | 553 | 1 snapshot, 544 deltas | 1209 | 6.0 us |
+| `funding` | 64 | 19 funding | 842 | 6.3 us |
 
 Words are pinned (within 10) in `test/test_allocation.ml`; times are from
 `dune exec ./bench/main.exe -- -quota 3` on an M-series Mac, including JSON decoding.
+The word counts fell (from 964, 789, 1294 and 868) when fixed-decimal started parsing
+prices and sizes in place; they are the same on macOS and Linux.
+
+### Websocket delivery
+
+`Live_feed` takes frames from `Venue_net.Ws_client` through `on_message`, so each frame
+goes from the connection's frame pipe straight to the normalizer. Before, it read
+`Ws_client.messages` one frame at a time with `Pipe.iter_without_pushback`, which costs
+about 13 words per frame for the hop (see venue-net's README); that path is kept as
+`Live_feed.For_testing.start_via_messages`.
+
+`dune exec ./bench/live.exe` writes the recorded trades frames 100 times (15,500 frames) as
+pre-encoded websocket frames from the in-process fake server in one burst, and counts
+minor words over the whole receive phase (socket reads, framing, delivery,
+`Normalizer.frame`, pipe writes). arm64, best of 10 runs:
+
+| Build | messages pipe (before) | `on_message` |
+| --- | --- | --- |
+| dev | 3.95 to 4.03 us, 986.9 to 987.9 words | 3.94 to 4.02 us, 974.8 words |
+| release | 3.91 to 3.94 us, 986.9 to 987.9 words | 3.91 to 3.93 us, 974.8 words |
+| release, `OCAMLPARAM='_,O3=1'` | 4.07 us, 959.4 words | 4.05 us, 946.3 words |
+
+The JSON decode dominates, so the time difference is inside the noise; the 12 to 13 words
+per frame are exact. `test/test_delivery.ml` runs both deliveries over every recorded
+stream and requires identical events, gaps and stats (gap ordering is covered by the
+`Live_feed` tests, which now run on `on_message`), and pins the words per trades frame
+end to end (dev profile: about 1044 before, 1031 now; a few words of slack for Linux CI).
 
 ## Coverage
 
