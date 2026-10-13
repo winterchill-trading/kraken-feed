@@ -50,7 +50,8 @@ let stats t : Stats.t =
   }
 ;;
 
-let start
+let start_with
+  ~via_messages
   ?on_raw
   ?(l2_depth = 10)
   ?(time_source = Time_source.wall_clock ())
@@ -99,8 +100,8 @@ let start
     let symbols = List.dedup_and_sort symbols ~compare:String.compare in
     let normalizer = Normalizer.create ~l2_depth () in
     (* Reconnects already reported. [on_connect] runs before the new connection's frames
-       are read, but frames travel through the client's pipe in a later job, so the frame
-       loop checks too: whichever runs first reports the gap and clears the books, so the
+       are delivered; the frame handler checks too (frames read from [messages] arrive in
+       a later job), so whichever runs first reports the gap and clears the books, and the
        gap always precedes the new connection's events. *)
     let reported = ref 0 in
     let report_reconnect ws ~recv_ts =
@@ -111,24 +112,18 @@ let start
         Normalizer.reset normalizer;
         gap ~recv_ts ~stream ())
     in
+    (* The client frames arrive on, set by [on_connect], which runs before the first frame
+       of every connection. *)
+    let current = ref None in
     let on_connect ws =
+      current := Some ws;
       if Ws_client.reconnects ws > 0
       then (
         Log.Global.info "kraken feed: %s reconnected, resubscribing" stream_name;
         report_reconnect ws ~recv_ts:(Time_source.now time_source));
       Ws_client.send ws (subscribe_request ~l2_depth stream symbols)
     in
-    let%map ws =
-      Ws_client.connect
-        ~time_source
-        ~ping
-        ~on_connect
-        ~log_name:("kraken " ^ stream_name)
-        ~url
-        ()
-      >>| Or_error.ok_exn
-    in
-    let resubscribe symbol =
+    let resubscribe ws symbol =
       let%bind () =
         Ws_client.send
           ws
@@ -136,13 +131,15 @@ let start
       in
       Ws_client.send ws (subscribe_request ~l2_depth stream [ symbol ])
     in
-    don't_wait_for
-      (Pipe.iter_without_pushback (Ws_client.messages ws) ~f:(fun frame ->
-         let recv_ts = Time_source.now time_source in
-         counters.frames <- counters.frames + 1;
-         report_reconnect ws ~recv_ts;
-         Option.iter on_raw ~f:(fun on_raw -> on_raw ~stream ~recv_ts frame);
-         match Normalizer.frame normalizer ~recv_ts frame with
+    let handle frame =
+      match !current with
+      | None -> ()
+      | Some ws ->
+        let recv_ts = Time_source.now time_source in
+        counters.frames <- counters.frames + 1;
+        report_reconnect ws ~recv_ts;
+        Option.iter on_raw ~f:(fun on_raw -> on_raw ~stream ~recv_ts frame);
+        (match Normalizer.frame normalizer ~recv_ts frame with
          | Error error ->
            counters.parse_errors <- counters.parse_errors + 1;
            Log.Global.error_s
@@ -155,7 +152,24 @@ let start
            List.iter events ~f:emit;
            List.iter symbols ~f:(fun symbol ->
              gap ~recv_ts ~stream ~instrument:(Normalizer.instrument symbol) ();
-             don't_wait_for (resubscribe symbol))));
+             don't_wait_for (resubscribe ws symbol)))
+    in
+    (* [on_message] hands each frame over with no pipe in between; reading [messages] one
+       frame at a time cost about 13 words per frame more (see venue-net's README). The
+       pipe path is kept for [For_testing.start_via_messages]. *)
+    let%map ws =
+      Ws_client.connect
+        ~time_source
+        ~ping
+        ~on_connect
+        ?on_message:(if via_messages then None else Some handle)
+        ~log_name:("kraken " ^ stream_name)
+        ~url
+        ()
+      >>| Or_error.ok_exn
+    in
+    if via_messages
+    then don't_wait_for (Pipe.iter_without_pushback (Ws_client.messages ws) ~f:handle);
     ws
   in
   let opened = ref [] in
@@ -193,6 +207,12 @@ let start
   in
   return { feed; counters; sockets = !opened }
 ;;
+
+let start = start_with ~via_messages:false
+
+module For_testing = struct
+  let start_via_messages = start_with ~via_messages:true
+end
 
 let create ?on_raw ?l2_depth ?time_source config ~symbols ~streams =
   let%map t = start ?on_raw ?l2_depth ?time_source config ~symbols ~streams in
