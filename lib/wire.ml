@@ -8,13 +8,96 @@ module Number = struct
   let to_string = Fn.id
   let is_exponent t = String.exists t ~f:(fun c -> Char.equal c 'e' || Char.equal c 'E')
   let to_float = Float.of_string
+  let invalid t = invalid_argf "Kraken number: cannot parse %S" t ()
+
+  (* Kraken prints small values such as funding rates as ["9.6e-6"], which the decimal
+     parser does not accept. Shifting the mantissa by the exponent in integer units keeps
+     the value exact instead of rounding it through a float. *)
+  let exponent_units t =
+    let len = String.length t in
+    let pos = ref 0 in
+    let negative =
+      match String.unsafe_get t 0 with
+      | '-' ->
+        incr pos;
+        true
+      | '+' ->
+        incr pos;
+        false
+      | _ -> false
+    in
+    let mantissa = ref 0 in
+    let digits = ref 0 in
+    let fraction_digits = ref 0 in
+    let in_fraction = ref false in
+    while
+      !pos < len
+      && not
+           (Char.equal (String.unsafe_get t !pos) 'e'
+            || Char.equal (String.unsafe_get t !pos) 'E')
+    do
+      let c = String.unsafe_get t !pos in
+      if Char.equal c '.' && not !in_fraction
+      then in_fraction := true
+      else if Char.is_digit c
+      then (
+        if !mantissa > (Int.max_value - 9) / 10 then invalid t;
+        mantissa := (!mantissa * 10) + (Char.to_int c - Char.to_int '0');
+        incr digits;
+        if !in_fraction then incr fraction_digits)
+      else invalid t;
+      incr pos
+    done;
+    if !digits = 0 || !pos >= len - 1 then invalid t;
+    incr pos;
+    let exponent_negative =
+      match String.unsafe_get t !pos with
+      | '-' ->
+        incr pos;
+        true
+      | '+' ->
+        incr pos;
+        false
+      | _ -> false
+    in
+    if !pos >= len then invalid t;
+    let exponent = ref 0 in
+    while !pos < len do
+      let c = String.unsafe_get t !pos in
+      if (not (Char.is_digit c)) || !exponent > 1000 then invalid t;
+      exponent := (!exponent * 10) + (Char.to_int c - Char.to_int '0');
+      incr pos
+    done;
+    let exponent = if exponent_negative then - !exponent else !exponent in
+    let shift = Md.Price.decimals - !fraction_digits + exponent in
+    let units =
+      if shift >= 0
+      then (
+        let units = ref !mantissa in
+        for _ = 1 to shift do
+          if !units > Int.max_value / 10 then invalid t;
+          units := !units * 10
+        done;
+        !units)
+      else (
+        (* Digits past the 8th fractional one are truncated, as [of_string] does. *)
+        let units = ref !mantissa in
+        let i = ref 0 in
+        while !i < -shift && !units > 0 do
+          units := !units / 10;
+          incr i
+        done;
+        !units)
+    in
+    if negative then -units else units
+  ;;
 
   let to_price t =
-    if is_exponent t then Md.Price.of_float (to_float t) else Md.Price.of_string t
+    if is_exponent t then Md.Price.of_units (exponent_units t) else Md.Price.of_string t
   ;;
 
   let to_size t =
-    if is_exponent t then Md.Size.of_float (to_float t) else Md.Size.of_string t
+    if is_exponent t then Md.Size.of_units (exponent_units t) else Md.Size.of_string t
   ;;
 end
 

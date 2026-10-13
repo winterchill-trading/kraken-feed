@@ -14,8 +14,8 @@ module Number : sig
   val of_string : string -> t
   val to_string : t -> string
 
-  (** Exact for plain decimals (digits past the 8th fractional one are truncated);
-      exponent forms go through a float. *)
+  (** Exact for plain decimals and exponent forms such as ["9.6e-6"]; digits past the 8th
+      fractional one are truncated. *)
   val to_price : t -> Market_data.Price.t
 
   val to_size : t -> Market_data.Size.t
